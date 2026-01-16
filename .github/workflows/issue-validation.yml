@@ -1,0 +1,56 @@
+name: Issue Validation
+on:
+  issues:
+    types: [opened, edited]
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get issue data
+        id: issue
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          TITLE=$(jq -r .issue.title "$GITHUB_EVENT_PATH")
+          BODY=$(jq -r .issue.body "$GITHUB_EVENT_PATH")
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Validate title and body
+        id: validation
+        run: |
+          # ---- Custom rules start here ----
+          if [[ ! "${{ steps.issue.outputs.title }}" =~ ^[A-Z] ]]; then
+            echo "::error ::Title must start with a capital letter."
+            exit 1
+          fi
+
+          TITLE_LEN=${#${{ steps.issue.outputs.title }}}
+          if (( TITLE_LEN < 10 || TITLE_LEN > 70 )); then
+            echo "::error ::Title length must be 10‑70 characters (got $TITLE_LEN)."
+            exit 1
+          fi
+
+          if ! grep -qE '^- $$ $$' <<< "${{ steps.issue.outputs.body }}"; then
+            echo "::error ::Body should contain a markdown checklist (e.g. \"- [ ] …\")."
+            exit 1
+          fi
+          # ---- Custom rules end ----
+          echo "All checks passed."
+
+      - name: Comment on failure
+        if: failure()
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :warning: **Issue validation failed**
+            Please address the errors above and update the issue.
